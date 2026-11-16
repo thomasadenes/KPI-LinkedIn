@@ -4,6 +4,9 @@ on:
   schedule:
     - cron: "0 5 * * *"   # tous les jours, vers 6 h ou 7 h (heure de Paris)
   workflow_dispatch:       # lancement manuel : onglet Actions > Synchronisation Notion > Run workflow
+  push:                    # relance aussitôt la synchro quand les scripts ou ce workflow changent
+    branches: [main]
+    paths: ["scripts/**", ".github/workflows/sync.yml"]
 
 permissions:
   contents: write
