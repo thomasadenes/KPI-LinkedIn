@@ -26,6 +26,7 @@ for k, v in DATA.get("texts", {}).items():
 MOIS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
 MOIS_L = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
 ddmm = lambda d: d[8:10] + "/" + d[5:7]
+long_date = lambda d: f"{int(d[8:10])}{'er' if d[8:10] == '01' else ''} {MOIS_L[int(d[5:7]) - 1]} {d[:4]}"
 S = lambda k, rs: sum(r[k] for r in rs)
 eng_w = lambda rs: S("inter", rs) / S("impr", rs) * 100
 T = S("impr", rows)
@@ -43,6 +44,7 @@ for pg in SUB_ORDER + sorted(set(DATA["subs"]) - set(SUB_ORDER)):
 s0, s1 = sum(a for _, a, _ in SUBS), sum(b for _, _, b in SUBS)
 BASE = max(set(SUB_D0.values()), key=list(SUB_D0.values()).count)
 LAST = max(SUB_D1.values())
+LASTPOST = max([p["date"] for p in DATA["posts_all"] if p["statut"] == "Publié"] + [r["date"] for r in rows])
 g = lambda a, b: (b - a) / a * 100
 
 # Pages proposées dans les menus déroulants (ordre : impressions décroissantes)
@@ -139,7 +141,9 @@ fmt_html = variants("fmt", fmt_block)
 
 # --- Rythme mensuel (filtrable par page)
 LASTMO = max(r["date"][5:7] for r in rows)
-months = [("01", "Janv."), ("02", "Févr."), ("03", "Mars"), ("04", "Avr."), ("05", "Mai"), ("06", "Juin"), ("07", "Juil."), ("08", "Août"), ("09", "Sept."), ("10", "Oct.")]
+_ALLM = [("01", "Janv."), ("02", "Févr."), ("03", "Mars"), ("04", "Avr."), ("05", "Mai"), ("06", "Juin"), ("07", "Juil."), ("08", "Août"), ("09", "Sept."), ("10", "Oct."), ("11", "Nov."), ("12", "Déc.")]
+NMO = max(10, int(LASTMO), int(LAST[5:7]))  # la frise s'allonge toute seule avec les nouveaux mois
+months = _ALLM[:NMO]
 
 
 def months_block(sub, vi):
@@ -158,7 +162,7 @@ def months_block(sub, vi):
         else:
             h = (v or 0) / mx * 100
             cols.append(f'<div class="col"><span class="cv">{n(v or 0)}</span><span class="cb{" hi" if m in top3 and v else ""}" style="height:{max(h, 0.6):.1f}%"></span><span class="cl">{lab}</span></div>')
-    return f'<div class="cols">{"".join(cols)}</div>'
+    return f'<div class="cols" style="--n:{NMO}">{"".join(cols)}</div>'
 
 
 months_html = variants("mo", months_block)
@@ -417,7 +421,7 @@ table.fit td:first-child{min-width:70px}
 tbody tr:nth-child(even){background:var(--card)}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 a{color:var(--link)}
-.cols{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:8px;align-items:end;height:260px;margin:18px 0 6px;padding-top:6px}
+.cols{display:grid;grid-template-columns:repeat(var(--n,10),minmax(0,1fr));gap:8px;align-items:end;height:260px;margin:18px 0 6px;padding-top:6px}
 .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
 .cv{font-size:12px;font-weight:700;color:var(--navy);margin-bottom:4px;font-variant-numeric:tabular-nums}
 .cb{width:100%;background:var(--blue);border-radius:6px 6px 0 0;display:block}
@@ -510,7 +514,7 @@ page = f"""<!doctype html>
 <nav class="dots" aria-label="Sections"></nav>
 <div class="band"><div class="wrap"><header>{LOGO}<div class="eyebrow">ADENES France · Réseaux sociaux</div>
 <h1>KPI LinkedIn 2026</h1>
-<p class="sub">Publications du 1er janvier au 31 octobre 2026 · Source : Notion · Abonnés : dernier relevé avant le 31/10</p></header>
+<p class="sub">Publications du 1er janvier 2026 au {long_date(LASTPOST)} · Source : Notion · Abonnés : dernier relevé le {ddmm(LAST)}</p></header>
 
 <div class="tiles">
 <div class="tile"><b>{n(s1)}</b><span>abonnés sur 6 pages · +{n(s1 - s0)} (+{pct(g(s0, s1))}) entre le {ddmm(BASE)} et le {ddmm(LAST)}</span></div>
