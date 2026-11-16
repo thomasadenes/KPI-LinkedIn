@@ -363,6 +363,145 @@ _dm = [SUB_D1[p] for p in P5 if p in SUB_D1]
 _main = max(set(_dm), key=_dm.count)
 SUBNOTE = ddmm(_main) + "".join(f" ; {p} {ddmm(SUB_D1[p])}" for p in P5 if p in SUB_D1 and SUB_D1[p] != _main)
 
+# =====================================================================
+# Comparateur de périodes (onglet fixe en haut de page, calculs faits dans le navigateur)
+# =====================================================================
+_cr = DATA.get("cmp_rows", rows)
+_cp = DATA.get("cmp_posts", DATA["posts_all"])
+_dates = [r["date"] for r in _cr] + [x["date"] for x in _cp if x["statut"] == "Publié"] + [d for v in DATA["subs"].values() for d, _ in v]
+CMP = {
+    "asof": max(_dates),
+    "min": min(_dates),
+    "pages": PAGES + [pg for pg in sorted(DATA["subs"]) if pg not in PAGES],
+    "rows": [[r["page"], r["date"], r["fmt"], r["impr"], r["clics"], r["reac"], r["com"], r["rep"], r["nom"], r.get("url")] for r in _cr],
+    "posts": [[x["page"], x["date"], x["statut"], 1 if x["kpi"] else 0] for x in _cp],
+    "subs": {pg: sorted(v) for pg, v in DATA["subs"].items()},
+}
+CMP_UI = """
+<div class="cmpbar"><button type="button" id="cmp-open" aria-haspopup="dialog">&#8646;&nbsp; Comparer deux périodes</button></div>
+<div id="cmp" class="cmp" role="dialog" aria-modal="true" aria-labelledby="cmp-title" hidden>
+<div class="cmp-in">
+<div class="cmp-head"><h2 id="cmp-title">Comparer deux périodes</h2><button type="button" id="cmp-close" aria-label="Fermer">&times;</button></div>
+<div class="cmp-form">
+<label>Raccourci<select id="cmp-preset"></select></label>
+<label>Page LinkedIn<select id="cmp-page"></select></label>
+<fieldset><legend>Période consultée (A)</legend><label>Du<input type="date" id="cmp-a1"></label><label>au<input type="date" id="cmp-a2"></label></fieldset>
+<fieldset><legend>Comparée à (B)</legend><label>Du<input type="date" id="cmp-b1"></label><label>au<input type="date" id="cmp-b2"></label></fieldset>
+</div>
+<div id="cmp-out" aria-live="polite"></div>
+</div></div>
+"""
+CMP_JS = r"""<script>
+(function(){
+var D=__CMPDATA__;
+var $=function(i){return document.getElementById(i)};
+var MO=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+function nf(v,d){return(v==null||isNaN(v))?'—':v.toLocaleString('fr-FR',{minimumFractionDigits:d||0,maximumFractionDigits:d||0})}
+function esc(t){return String(t==null?'':t).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function fd(s){return(+s.slice(8,10))+' '+MO[+s.slice(5,7)-1]+' '+s.slice(0,4)}
+function utc(s){return new Date(s+'T12:00:00Z')}
+function addDays(s,n){var d=utc(s);d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10)}
+function nDays(a,b){return Math.round((utc(b)-utc(a))/864e5)+1}
+function p2(n){return('0'+n).slice(-2)}
+function ms(y,m){return y+'-'+p2(m)+'-01'}
+function me(y,m){return addDays(m===12?ms(y+1,1):ms(y,m+1),-1)}
+function pm(y,m){return m===1?[y-1,12]:[y,m-1]}
+function pq(y,q){return q<1?[y-1,4]:[y,q]}
+var Y=+D.asof.slice(0,4),M=+D.asof.slice(5,7);
+var PRE=[
+ ['m1','Dernier mois complet vs mois précédent',function(){var a=pm(Y,M),b=pm(a[0],a[1]);return[ms(a[0],a[1]),me(a[0],a[1]),ms(b[0],b[1]),me(b[0],b[1])]}],
+ ['mtd','Mois en cours vs mois précédent (même nombre de jours)',function(){var b=pm(Y,M),s=ms(b[0],b[1]),e=addDays(s,+D.asof.slice(8,10)-1),f=me(b[0],b[1]);return[ms(Y,M),D.asof,s,e>f?f:e]}],
+ ['d30','30 derniers jours vs 30 jours précédents',function(){return[addDays(D.asof,-29),D.asof,addDays(D.asof,-59),addDays(D.asof,-30)]}],
+ ['q1','Dernier trimestre complet vs trimestre précédent',function(){var a=pq(Y,Math.floor((M-1)/3)),b=pq(a[0],a[1]-1);return[ms(a[0],a[1]*3-2),me(a[0],a[1]*3),ms(b[0],b[1]*3-2),me(b[0],b[1]*3)]}],
+ ['sem','Semestre en cours vs semestre précédent',function(){return M>=7?[ms(Y,7),D.asof,ms(Y,1),me(Y,6)]:[ms(Y,1),D.asof,ms(Y-1,7),me(Y-1,12)]}],
+ ['custom','Dates personnalisées',null]
+];
+function agg(a,b,pg){
+ var ok=function(p){return!pg||p===pg};
+ var R=D.rows.filter(function(r){return r[1]>=a&&r[1]<=b&&ok(r[0])});
+ var o={R:R,k:R.length,clics:0,reac:0,com:0,rep:0,impr:0};
+ o.pub=D.posts.filter(function(x){return x[2]==='Publié'&&x[1]>=a&&x[1]<=b&&ok(x[0])}).length;
+ R.forEach(function(r){o.impr+=r[3];o.clics+=r[4];o.reac+=r[5];o.com+=r[6];o.rep+=r[7]});
+ o.inter=o.clics+o.reac+o.com+o.rep;
+ o.eng=o.impr?o.inter/o.impr*100:null;o.reacK=o.impr?o.reac/o.impr*1000:null;o.per=o.k?o.impr/o.k:null;
+ return o}
+function subGain(pg,a,b){
+ var h=D.subs[pg]||[],s=null,e=null;
+ h.forEach(function(x){if(x[0]<=b)e=x;if(x[0]<=a)s=x});
+ if(!s)s=h.filter(function(x){return x[0]>=a&&x[0]<=b})[0]||null;
+ if(!s||!e||e[0]<=s[0])return null;
+ return{gain:e[1]-s[1],from:s[0],to:e[0]}}
+function subsAgg(a,b,pg){
+ var pgs=pg?[pg]:Object.keys(D.subs),t=0,n=0,lo=null,hi=null;
+ pgs.forEach(function(p){var g=subGain(p,a,b);if(g){t+=g.gain;n++;lo=lo&&lo<g.from?lo:g.from;hi=hi&&hi>g.to?hi:g.to}});
+ return n?{gain:t,n:n,from:lo,to:hi}:null}
+function delta(a,b,mode){
+ if(a==null||b==null)return'<em class="fl">—</em>';
+ var d,t;
+ if(mode==='pt'){d=a-b;t=(d>=0?'+':'−')+nf(Math.abs(d),1)+' pt'}
+ else if(mode==='abs'){d=a-b;t=(d>=0?'+':'−')+nf(Math.abs(d))}
+ else{if(!b)return'<em class="fl">—</em>';d=(a-b)/b*100;t=(d>=0?'+':'−')+nf(Math.abs(d),1)+' %'}
+ return'<em class="'+(d>0?'up':d<0?'down':'fl')+'">'+t+'</em>'}
+function tile(l,av,bv,fmt,mode,hint){
+ return'<div class="ctile"><span class="ctl">'+l+'</span><b>'+(av==null?'—':fmt(av))+'</b><small>vs '+(bv==null?'—':fmt(bv))+'</small>'+delta(av,bv,mode)+(hint?'<span class="cth">'+hint+'</span>':'')+'</div>'}
+function perTable(A,B,a1,a2,b1,b2,pg){
+ var pgs=pg?[pg]:D.pages,rows=pgs.map(function(p){
+  var x=agg(a1,a2,p),y=agg(b1,b2,p),sa=subGain(p,a1,a2),sb=subGain(p,b1,b2);
+  return'<tr><td>'+esc(p)+'</td><td class="num">'+nf(x.impr)+'</td><td class="num">'+nf(y.impr)+'</td><td class="num">'+delta(x.impr,y.impr)+'</td><td class="num">'+(x.eng==null?'—':nf(x.eng,1)+' %')+'</td><td class="num">'+(y.eng==null?'—':nf(y.eng,1)+' %')+'</td><td class="num">'+x.pub+' / '+y.pub+'</td><td class="num">'+(sa?(sa.gain>=0?'+':'−')+nf(Math.abs(sa.gain)):'—')+'</td><td class="num">'+(sb?(sb.gain>=0?'+':'−')+nf(Math.abs(sb.gain)):'—')+'</td></tr>'});
+ return'<div class="scroll"><table class="fit"><thead><tr><th>Page</th><th class="num">Impr. A</th><th class="num">Impr. B</th><th class="num">Évol.</th><th class="num">Eng. A</th><th class="num">Eng. B</th><th class="num">Posts publiés A / B</th><th class="num">Abonnés A</th><th class="num">Abonnés B</th></tr></thead><tbody>'+rows.join('')+'</tbody></table></div>'}
+function fmtTable(A,B){
+ var f={};
+ A.R.forEach(function(r){var k=r[2]||'Non renseigné';(f[k]=f[k]||{a:[0,0,0],b:[0,0,0]});f[k].a[0]++;f[k].a[1]+=r[3];f[k].a[2]+=r[4]+r[5]+r[6]+r[7]});
+ B.R.forEach(function(r){var k=r[2]||'Non renseigné';(f[k]=f[k]||{a:[0,0,0],b:[0,0,0]});f[k].b[0]++;f[k].b[1]+=r[3];f[k].b[2]+=r[4]+r[5]+r[6]+r[7]});
+ var ks=Object.keys(f).sort(function(x,y){return(f[y].a[1]+f[y].b[1])-(f[x].a[1]+f[x].b[1])});
+ if(!ks.length)return'';
+ var e=function(v){return v[1]?nf(v[2]/v[1]*100,1)+' %':'—'},m=function(v){return v[0]?nf(v[1]/v[0]):'—'};
+ return'<h3>Par format</h3><div class="scroll"><table class="fit"><thead><tr><th>Format</th><th class="num">Posts A / B</th><th class="num">Impr. moy. A</th><th class="num">Impr. moy. B</th><th class="num">Eng. A</th><th class="num">Eng. B</th></tr></thead><tbody>'+ks.map(function(k){var v=f[k];return'<tr><td>'+esc(k)+'</td><td class="num">'+v.a[0]+' / '+v.b[0]+'</td><td class="num">'+m(v.a)+'</td><td class="num">'+m(v.b)+'</td><td class="num">'+e(v.a)+'</td><td class="num">'+e(v.b)+'</td></tr>'}).join('')+'</tbody></table></div>'}
+function top(o,t){
+ var l=o.R.slice().sort(function(x,y){return y[3]-x[3]}).slice(0,3);
+ if(!l.length)return'<div class="ctop"><h3>'+t+'</h3><p class="note">Aucun post avec KPI saisis.</p></div>';
+ return'<div class="ctop"><h3>'+t+'</h3><ol>'+l.map(function(r){var n=esc(r[8]||'(sans titre)');if(r[9])n='<a href="'+esc(r[9])+'" target="_blank" rel="noopener noreferrer">'+n+'</a>';return'<li>'+n+'<br><span class="note">'+esc(r[0])+' · '+fd(r[1])+' · '+nf(r[3])+' impressions · '+nf((r[4]+r[5]+r[6]+r[7])/r[3]*100,1)+' % d\'engagement</span></li>'}).join('')+'</ol></div>'}
+function render(){
+ var a1=$('cmp-a1').value,a2=$('cmp-a2').value,b1=$('cmp-b1').value,b2=$('cmp-b2').value,pg=$('cmp-page').value,out=$('cmp-out');
+ if(!a1||!a2||!b1||!b2){out.innerHTML='<p class="note">Renseignez les quatre dates.</p>';return}
+ if(a1>a2||b1>b2){out.innerHTML='<p class="cmp-warn">Une période commence après sa date de fin : corrigez les dates.</p>';return}
+ var A=agg(a1,a2,pg),B=agg(b1,b2,pg),SA=subsAgg(a1,a2,pg),SB=subsAgg(b1,b2,pg),dA=nDays(a1,a2),dB=nDays(b1,b2),h='';
+ h+='<p class="cmp-per"><span class="chipA">A</span> '+fd(a1)+' → '+fd(a2)+' <small>('+dA+' j)</small> &nbsp; <span class="chipB">B</span> '+fd(b1)+' → '+fd(b2)+' <small>('+dB+' j)</small></p>';
+ if(dA!==dB)h+='<p class="cmp-warn">Les deux périodes n\'ont pas la même durée ('+dA+' j contre '+dB+' j) : comparez plutôt les moyennes (impressions par post, engagement) que les totaux.</p>';
+ if(!A.k&&!B.k)h+='<p class="cmp-warn">Aucun post avec KPI saisis sur ces périodes.</p>';
+ h+='<div class="ctiles">'
+  +tile('Posts publiés',A.pub,B.pub,nf)
+  +tile('Posts avec KPI saisis',A.k,B.k,nf)
+  +tile('Impressions',A.impr,B.impr,nf)
+  +tile('Impressions par post',A.per,B.per,nf)
+  +tile('Taux d\'engagement',A.eng,B.eng,function(v){return nf(v,1)+' %'},'pt')
+  +tile('Réactions / 1 000 impr.',A.reacK,B.reacK,function(v){return nf(v,1)})
+  +tile('Gain d\'abonnés',SA?SA.gain:null,SB?SB.gain:null,function(v){return(v>=0?'+':'−')+nf(Math.abs(v))},'abs',SA?'relevés du '+fd(SA.from)+' au '+fd(SA.to):'pas assez de relevés')
+  +'</div>';
+ h+='<h3>Par page</h3>'+perTable(A,B,a1,a2,b1,b2,pg);
+ h+=fmtTable(A,B);
+ h+='<div class="ctops">'+top(A,'Top 3 · période A')+top(B,'Top 3 · période B')+'</div>';
+ h+='<p class="note">Engagement = (clics + réactions + commentaires + repartages) ÷ impressions, sur les posts avec KPI saisis. Le gain d\'abonnés compare le dernier relevé de la période au dernier relevé avant son début (à défaut, au premier relevé de la période) : il dépend donc des dates de relevé, et n\'est pas filtré par format. Les chiffres sont mis à jour chaque jour depuis Notion.</p>';
+ out.innerHTML=h}
+function setP(id){
+ var p=PRE.filter(function(x){return x[0]===id})[0];
+ if(p&&p[2]){var v=p[2]();$('cmp-a1').value=v[0];$('cmp-a2').value=v[1];$('cmp-b1').value=v[2];$('cmp-b2').value=v[3]}}
+function init(){
+ $('cmp-preset').innerHTML=PRE.map(function(p){return'<option value="'+p[0]+'">'+p[1]+'</option>'}).join('');
+ $('cmp-page').innerHTML='<option value="">Toutes les pages</option>'+D.pages.map(function(p){return'<option>'+esc(p)+'</option>'}).join('');
+ ['cmp-a1','cmp-a2','cmp-b1','cmp-b2'].forEach(function(i){$(i).min=D.min;$(i).max=D.asof;$(i).addEventListener('change',function(){$('cmp-preset').value='custom';render()})});
+ $('cmp-preset').addEventListener('change',function(){setP(this.value);render()});
+ $('cmp-page').addEventListener('change',render);
+ setP('m1');render()}
+var box=$('cmp'),root=document.documentElement,last=null;
+function open(){if(!box.dataset.ready){init();box.dataset.ready='1'}last=document.activeElement;box.hidden=false;root.classList.add('cmp-lock');$('cmp-close').focus()}
+function close(){box.hidden=true;root.classList.remove('cmp-lock');if(last&&last.focus)last.focus()}
+$('cmp-open').addEventListener('click',open);$('cmp-close').addEventListener('click',close);
+box.addEventListener('click',function(e){if(e.target===box)close()});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!box.hidden)close()});
+})();
+</script>""".replace("__CMPDATA__", json.dumps(CMP, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/"))
+
 CSS = """
 :root{--navy:#002F6B;--blue:#76BAD8;--tint:#E8F2F8;--bg:#fff;--ink:#0b2447;--mute:#5a6b82;--line:#d6e1ec;--card:#f4f8fb;--link:#00539f}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;color-scheme:light}
@@ -453,6 +592,37 @@ a{color:var(--link)}
 .ctrl button{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--navy);font-size:24px;line-height:1;cursor:pointer}
 .ctrl button:hover{background:var(--navy);color:var(--bg)}
 .cnt{min-width:56px;text-align:center;color:var(--mute);font-variant-numeric:tabular-nums}
+.cmpbar{position:fixed;top:0;left:0;right:0;z-index:50;height:40px;background:#002F6B;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 6px rgba(0,0,0,.25)}
+.cmpbar button{background:transparent;border:0;color:#fff;font-weight:700;font-size:15px;font-family:inherit;cursor:pointer;padding:10px 18px;border-radius:8px}
+.cmpbar button:hover,.cmpbar button:focus-visible{background:rgba(255,255,255,.16);outline:none}
+.band{padding-top:64px}
+.cmp[hidden]{display:none}
+.cmp{position:fixed;inset:0;z-index:100;background:rgba(0,20,50,.55);overflow-y:auto;padding:24px 12px}
+html.cmp-lock{overflow:hidden}
+.cmp-in{max-width:1080px;margin:0 auto;background:var(--bg);color:var(--ink);border-radius:16px;padding:22px 22px 26px}
+.cmp-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.cmp-head h2{margin:0}
+.cmp-head button{width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--navy);font-size:26px;line-height:1;cursor:pointer}
+.cmp-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin:16px 0 8px}
+.cmp-form label{display:flex;flex-direction:column;gap:4px;font-weight:700;font-size:14px;color:var(--navy)}
+.cmp-form select,.cmp-form input{font:inherit;font-weight:400;color:var(--ink);background:var(--bg);border:1.5px solid var(--line);border-radius:8px;padding:8px 10px;min-width:0}
+.cmp-form fieldset{border:1.5px solid var(--line);border-radius:12px;margin:0;padding:8px 12px 12px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.cmp-form legend{font-weight:700;color:var(--navy);padding:0 6px;font-size:14px}
+.cmp-per{margin:14px 0 4px;font-size:15px}
+.chipA,.chipB{display:inline-block;min-width:22px;text-align:center;border-radius:6px;font-weight:700;color:#fff;padding:0 6px}
+.chipA{background:#002F6B}.chipB{background:#5a8fb0}
+.cmp-warn{background:#fff4e0;border:1px solid #f0c987;color:#6b4300;border-radius:10px;padding:8px 12px;margin:10px 0;font-size:14.5px}
+.ctiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:14px 0 18px}
+.ctile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
+.ctile .ctl{font-size:13px;color:var(--mute)}
+.ctile b{font-size:26px;line-height:1.15;color:var(--navy);font-variant-numeric:tabular-nums}
+.ctile small{color:var(--mute);font-size:13px}
+.ctile em{font-style:normal;font-weight:700;font-size:15px}
+.ctile .cth{font-size:11.5px;color:var(--mute)}
+em.up{color:#14783c}em.down{color:#b3261e}em.fl{color:var(--mute)}
+.cmp h3{font-size:17px;color:var(--navy);margin:18px 0 4px}
+.ctops{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+.ctop ol{margin:6px 0 0;padding-left:20px}.ctop li{margin:0 0 8px;font-size:14.5px}
 .sec-h{font-size:18px;color:var(--navy);margin:18px 0 0}
 footer{color:var(--mute);font-size:13px;padding:22px 0 0}
 """
@@ -470,7 +640,7 @@ document.querySelectorAll('select[data-grp]').forEach(function(sel){sel.addEvent
 secs.forEach(function(s,i){var b=document.createElement('button');b.type='button';b.title=names[i]||('Section '+(i+1));b.setAttribute('aria-label',b.title);b.addEventListener('click',function(){s.scrollIntoView({behavior:'smooth',block:'start'})});nav.appendChild(b)});
 var bs=nav.children;function mark(){var y=window.innerHeight/2,k=0;secs.forEach(function(s,i){var r=s.getBoundingClientRect();if(r.top<=y)k=i});[].forEach.call(bs,function(b,i){b.classList.toggle('on',i===k)})}
 window.addEventListener('scroll',mark,{passive:true});window.addEventListener('resize',mark);mark();
-document.addEventListener('keydown',function(e){if(e.target.closest&&(e.target.closest('.track2')||e.target.tagName==='SELECT'))return;var k=e.key;if(k==='ArrowDown'||k==='PageDown'||k==='ArrowUp'||k==='PageUp'){var y=window.innerHeight/2,c=0;secs.forEach(function(s,i){if(s.getBoundingClientRect().top<=y)c=i});var d=(k==='ArrowDown'||k==='PageDown')?1:-1,t=secs[Math.max(0,Math.min(secs.length-1,c+d))];e.preventDefault();t.scrollIntoView({behavior:'smooth',block:'start'})}});
+document.addEventListener('keydown',function(e){if(e.target.closest&&(e.target.closest('.track2')||e.target.tagName==='SELECT'||e.target.tagName==='INPUT'||(document.getElementById('cmp')&&!document.getElementById('cmp').hidden)))return;var k=e.key;if(k==='ArrowDown'||k==='PageDown'||k==='ArrowUp'||k==='PageUp'){var y=window.innerHeight/2,c=0;secs.forEach(function(s,i){if(s.getBoundingClientRect().top<=y)c=i});var d=(k==='ArrowDown'||k==='PageDown')?1:-1,t=secs[Math.max(0,Math.min(secs.length-1,c+d))];e.preventDefault();t.scrollIntoView({behavior:'smooth',block:'start'})}});
 })();
 (function(){
 if(window.matchMedia&&matchMedia('(prefers-reduced-motion:reduce)').matches)return;
@@ -511,6 +681,7 @@ page = f"""<!doctype html>
 <link rel="icon" type="image/png" href="data:image/png;base64,{FAV}">
 <title>KPI LinkedIn 2026</title>
 <style>{CSS}</style></head><body>
+{CMP_UI}
 <nav class="dots" aria-label="Sections"></nav>
 <div class="band"><div class="wrap"><header>{LOGO}<div class="eyebrow">ADENES France · Réseaux sociaux</div>
 <h1>KPI LinkedIn 2026</h1>
@@ -589,6 +760,7 @@ page = f"""<!doctype html>
 <footer>Page confidentielle, non indexée. Mise à jour : @@UPDATED@@.</footer>
 </div></section>
 {JS}
+{CMP_JS}
 </body></html>"""
 open(OUT, "w", encoding="utf-8").write(page)
 print("ok", len(page), "posts", len(rows))

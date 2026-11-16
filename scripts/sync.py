@@ -93,15 +93,16 @@ def day(page, name):
 
 
 # --- 1. publications
+# Pas de borne haute : le comparateur de périodes de la page doit pouvoir consulter les données au fil de l'eau.
+# Le rapport 2026 (sections existantes) reste limité à END plus bas.
 posts = query_all(POSTS_DS, {"and": [
-    {"property": "Date de publication", "date": {"on_or_after": START}},
-    {"property": "Date de publication", "date": {"on_or_before": END}}]})
+    {"property": "Date de publication", "date": {"on_or_after": START}}]})
 rows, posts_all = [], []
 for p in posts:
     page = sel(p, "Page")
     page = PAGE_MAP.get(page, page)
     date = day(p, "Date de publication")
-    if not page or not date or page.lower() in EXCLUDED or not (START <= date <= END):
+    if not page or not date or page.lower() in EXCLUDED or not (START <= date):
         continue
     nom = plain(prop(p, "Nom").get("title")).strip()
     impr = num(p, "Impressions")
@@ -113,6 +114,9 @@ for p in posts:
                      "url": prop(p, "URL").get("url"), "impr": impr, "clics": z("Clics"), "reac": z("Réactions"),
                      "com": z("Commentaires"), "rep": z("Repartages"), "eng_saisi": num(p, "Taux d'engagement")})
 rows.sort(key=lambda r: (r["date"], r["page"], r["nom"]), reverse=True)
+cmp_rows, cmp_posts = list(rows), list(posts_all)  # tout l'historique, pour le comparateur de périodes
+rows = [r for r in rows if r["date"] <= END]
+posts_all = [p for p in posts_all if p["date"] <= END]
 
 # --- 2. abonnés
 subs = defaultdict(list)
@@ -160,7 +164,8 @@ for k, pid in need.items():
     time.sleep(0.34)
 
 today = dt.datetime.now(ZoneInfo("Europe/Paris")).date()
-data = {"start": START, "end": END, "rows": rows, "posts_all": posts_all, "subs": subs, "texts": texts}
+data = {"start": START, "end": END, "rows": rows, "posts_all": posts_all, "subs": subs, "texts": texts,
+        "cmp_rows": cmp_rows, "cmp_posts": cmp_posts}
 tmp = tempfile.mkdtemp()
 dj, rj, hj = (os.path.join(tmp, x) for x in ("data.json", "ref.json", "kpi.html"))
 json.dump(data, open(dj, "w", encoding="utf-8"), ensure_ascii=False)
